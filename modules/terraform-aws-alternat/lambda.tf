@@ -35,6 +35,7 @@ resource "aws_lambda_function" "alternat_autoscaling_hook" {
 
 locals {
   autoscaling_func_env_vars = {
+    az_list = var.vpc_az_maps[*].az
     # Lambda function env vars cannot contain hyphens
     for obj in var.vpc_az_maps
     : replace(upper(obj.az), "-", "_") => join(",", obj.route_table_ids)
@@ -202,4 +203,31 @@ resource "aws_lambda_permission" "allow_cloudwatch_to_call_connectivity_tester" 
   function_name = aws_lambda_function.alternat_connectivity_tester[each.key].function_name
   principal     = "events.amazonaws.com"
   source_arn    = aws_cloudwatch_event_rule.every_minute.arn
+}
+
+# Lambda to restore NAT Instances
+resource "aws_lambda_function" "restore_nat_instance" {
+  function_name = var.restore_alternat_function_name
+  architectures = var.lambda_function_architectures
+  package_type  = var.lambda_package_type
+  memory_size   = var.lambda_memory_size
+  timeout       = var.lambda_timeout
+  role          = aws_iam_role.nat_lambda_role.arn
+
+  layers        = var.lambda_layer_arns
+
+  image_uri = var.lambda_package_type == "Image" ? "${var.alternat_image_uri}:${var.alternat_image_tag}" : null
+
+  runtime          = var.lambda_package_type == "Zip" ? "python3.8" : null
+  handler          = var.lambda_package_type == "Zip" ? var.lambda_handlers.restore_alternat : null
+  filename         = var.lambda_package_type == "Zip" ? data.archive_file.lambda[0].output_path : null
+  source_code_hash = var.lambda_package_type == "Zip" ? data.archive_file.lambda[0].output_base64sha256 : null
+
+  environment {
+    variables = merge(local.autoscaling_func_env_vars, var.lambda_environment_variables)
+  }
+
+  tags = merge({
+    FunctionName = "alternat-restore-alternet",
+  }, var.tags)
 }

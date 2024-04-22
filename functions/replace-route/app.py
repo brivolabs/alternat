@@ -27,6 +27,7 @@ DEFAULT_CONNECTIVITY_CHECK_INTERVAL = "5"
 # Which URLs to check for connectivity
 DEFAULT_CHECK_URLS = ["https://www.example.com", "https://www.google.com"]
 
+ROUTE_REPLACEMENT_SUCCESSFUL = "Route replacement succeeded"
 
 REQUEST_TIMEOUT = 5
 
@@ -93,10 +94,10 @@ def get_nat_gateway_id(vpc_id, subnet_id):
     return nat_gateway_id
 
 
-def replace_route(route_table_id, nat_gateway_id):
+def replace_route(route_table_id, nat_gateway_id, rtype="NatGatewayId"):
     new_route_table = {
         "DestinationCidrBlock": "0.0.0.0/0",
-        "NatGatewayId": nat_gateway_id,
+        ''+rtype: nat_gateway_id,
         "RouteTableId": route_table_id
     }
     try:
@@ -106,6 +107,30 @@ def replace_route(route_table_id, nat_gateway_id):
         logger.error("Unable to replace route")
         raise error
 
+
+def get_nat_instance_id(az):
+    try:
+        nat_instances = ec2_client.desribe_instances(
+            Filters=[
+                {
+                    'Name':"tag:Name",
+                    'Values':[
+                        f"alternat-${az}"
+                    ]
+                }
+            ]
+        )
+    except botocore.exceptions.ClientError as error:
+        logger.error("Unable to describe nat instance")
+        raise error
+    logger.debug("NAT Instances: %s", nat_instances)
+    if len(nat_instances.get("Reservations")) < 1 and len(nat_instances["Reservations"][0]["Instances"]) < 1:
+        raise MissingNatGatewayError
+
+    nat_instance = nat_instances["Reservations"][0]["Instances"][0]
+    nat_instance_id = nat_instance["InstanceId"]
+
+    return nat_instance_id
 
 def check_connection(check_urls):
     """
@@ -138,7 +163,19 @@ def check_connection(check_urls):
 
     for rtb in route_tables:
         replace_route(rtb, nat_gateway_id)
-        logger.info("Route replacement succeeded")
+        logger.info(ROUTE_REPLACEMENT_SUCCESSFUL)
+    return False
+
+
+def reset_nat_instance(function_name):
+    name_parts = function_name.split("-")
+    az = "-".join(name_parts[-3:])
+    logger.info(f"found in ${az}")
+    instance_id = get_nat_instance_id(az)
+    route_tables = "ROUTE_TABLE_IDS_CSV" in os.environ and os.getenv("ROUTE_TABLE_IDS_CSV").split(",")
+    for rtb in route_tables:
+        replace_route(rtb, instance_id, "InstanceId")
+        logger.info(ROUTE_REPLACEMENT_SUCCESSFUL)
     return False
 
 
@@ -155,6 +192,9 @@ def connectivity_test_handler(event, context):
 
     check_interval = int(os.getenv("CONNECTIVITY_CHECK_INTERVAL", DEFAULT_CONNECTIVITY_CHECK_INTERVAL))
     check_urls = "CHECK_URLS" in os.environ and os.getenv("CHECK_URLS").split(",") or DEFAULT_CHECK_URLS
+
+    # reset to nat instance at start of each cycle
+    reset_nat_instance(context.function_name)
 
     # Run connectivity checks for approximately 1 minute
     run = 0
@@ -192,8 +232,11 @@ def handler(event, _):
 
     for rtb in route_tables:
         replace_route(rtb, nat_gateway_id)
-        logger.info("Route replacement succeeded")
+        logger.info(ROUTE_REPLACEMENT_SUCCESSFUL)
 
+
+def restore_handler(event, _):
+    return os.getenv("az_list")
 
 class UnknownEventTypeError(Exception): pass
 

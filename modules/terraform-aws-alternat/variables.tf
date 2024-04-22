@@ -31,6 +31,12 @@ variable "autoscaling_hook_function_name" {
   default     = "alternat-autoscaling-hook"
 }
 
+variable "restore_alternat_function_name" {
+  description = "The name to use for the restore NAT instance traffic Lambda function."
+  type        = string
+  default     = "restore-alternat"
+}
+
 variable "create_nat_gateways" {
   description = "Whether to create the NAT Gateway and the NAT Gateway EIP in this module. If false, you must create and manage NAT Gateways separately."
   type        = bool
@@ -229,10 +235,12 @@ variable "lambda_handlers" {
   type = object({
     connectivity_tester       = string,
     alternat_autoscaling_hook = string,
+    restore_alternat = string
   })
   default = {
     connectivity_tester       = "app.connectivity_test_handler",
-    alternat_autoscaling_hook = "app.handler"
+    alternat_autoscaling_hook = "app.handler",
+    restore_alternat = "app.restore_handler"
   }
 }
 
