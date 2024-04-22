@@ -35,7 +35,6 @@ resource "aws_lambda_function" "alternat_autoscaling_hook" {
 
 locals {
   autoscaling_func_env_vars = {
-    az_list = var.vpc_az_maps[*].az
     # Lambda function env vars cannot contain hyphens
     for obj in var.vpc_az_maps
     : replace(upper(obj.az), "-", "_") => join(",", obj.route_table_ids)
@@ -224,7 +223,7 @@ resource "aws_lambda_function" "restore_nat_instance" {
   source_code_hash = var.lambda_package_type == "Zip" ? data.archive_file.lambda[0].output_base64sha256 : null
 
   environment {
-    variables = merge(local.autoscaling_func_env_vars, var.lambda_environment_variables)
+    variables = merge(local.autoscaling_func_env_vars, var.lambda_environment_variables, {az_list = join(",",tolist(var.vpc_az_maps[*].az))})
   }
 
   tags = merge({
